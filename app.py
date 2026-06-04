@@ -406,14 +406,23 @@ def create_video_callback(
 
 
 def build_rtc_configuration() -> dict[str, Any]:
-    # Multiple STUN servers improve connection reliability across networks.
+    # STUN + free TURN servers for reliable connectivity on Streamlit Cloud.
+    # Open Relay (metered.ca) provides 20 GB/month free TURN traffic.
     ice_servers: list[dict[str, Any]] = [
         {"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun.cloudflare.com:3478"]},
+        {"urls": ["stun:openrelay.metered.ca:80"]},
+        {
+            "urls": [
+                "turn:openrelay.metered.ca:80",
+                "turn:openrelay.metered.ca:443",
+                "turn:openrelay.metered.ca:443?transport=tcp",
+            ],
+            "username": "openrelayproject",
+            "credential": "openrelayproject",
+        },
     ]
 
-    # Optional TURN configuration from environment variables.
-    # Avoid accessing Streamlit secrets to prevent errors when secrets.toml is absent.
+    # Optional custom TURN configuration from environment variables.
     turn_urls = os.getenv("TURN_URLS", "")
     turn_username = os.getenv("TURN_USERNAME", "")
     turn_password = os.getenv("TURN_PASSWORD", "")
@@ -530,7 +539,7 @@ st.markdown(
     "--glow:0 0 20px rgba(236,72,153,0.15);"
     "--radius-sm:10px;--radius-md:14px}"
     "html,body,.stApp{background:var(--blush-50)!important;color:var(--text-primary)!important;"
-    "font-family:'Outfit',sans-serif!important}"
+    "font-family:'Outfit',sans-serif}"
     ".stApp::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;"
     "background:radial-gradient(ellipse 50% 60% at 5% 10%,rgba(251,207,232,0.5),transparent),"
     "radial-gradient(ellipse 40% 50% at 95% 85%,rgba(221,214,254,0.45),transparent),"
@@ -547,8 +556,12 @@ st.markdown(
     '[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3{color:var(--blush-600)!important;'
     "font-size:1rem;font-weight:700;letter-spacing:0.04em;text-transform:uppercase}"
     '[data-testid="stSidebar"] label{color:var(--text-secondary)!important;font-weight:500}'
-    "label,p,span,.stMarkdown,.stCaption,[data-testid='stMarkdownContainer']"
+    "label,p,.stMarkdown,.stCaption,[data-testid='stMarkdownContainer']"
     "{color:var(--text-secondary)!important;font-family:'Outfit',sans-serif!important}"
+    "[data-testid='stExpanderToggleIcon'],[data-testid='stIconMaterial'],"
+    "span[style*='Material'],span[class*='material'],span[class*='Material'],"
+    ".material-symbols-rounded,.material-icons"
+    "{font-family:'Material Symbols Rounded','Material Icons'!important}"
     '[data-testid="stMetricValue"]{color:var(--blush-600)!important;font-weight:700;font-size:1.3rem}'
     '[data-testid="stExpander"]{background:var(--surface)!important;backdrop-filter:blur(12px);'
     "-webkit-backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:var(--radius-md);"
