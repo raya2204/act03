@@ -686,54 +686,42 @@ with st.sidebar:
         reset_runtime()
         st.success("Session stats reset to zero.")
 
-video_col, info_col = st.columns([1.9, 1.1], gap="medium")
+camera_tab, stream_tab = st.tabs(["Camera Capture", "Live Stream (Beta)"])
 
-with video_col:
-    st.subheader("Live Camera Preview")
-    if webrtc_streamer is None or av is None:
-        st.error("Realtime preview is unavailable because WebRTC dependencies failed to load.")
-        if WEBRTC_IMPORT_ERROR:
-            st.code(WEBRTC_IMPORT_ERROR)
-        if AV_IMPORT_ERROR:
-            st.code(AV_IMPORT_ERROR)
-    else:
-        try:
-            video_callback = create_video_callback(
-                model=model,
-                conf_threshold=conf_threshold,
-                iou_threshold=iou_threshold,
-                alert_targets=set(alert_targets),
-                alert_confidence=alert_confidence,
-                alert_cooldown_sec=alert_cooldown_sec,
-                auto_capture=False,
-                auto_capture_interval_sec=60.0,
-                process_every_n_frames=process_every_n_frames,
-                inference_size=inference_size,
-            )
-            webrtc_streamer(
-                key="object-detection",
-                video_frame_callback=video_callback,
-                rtc_configuration=build_rtc_configuration(),
-                async_processing=True,
-                # Explicit constraints for standard 16:9 ratio to prevent the "zoomed in" cropping effect
-                media_stream_constraints={
-                    "video": {"width": {"ideal": 1280}, "height": {"ideal": 720}, "aspectRatio": 1.777},
-                    "audio": False,
-                },
-            )
-        except Exception as webrtc_error:
-            st.error("WebRTC session failed to start.")
-            st.caption(f"WebRTC error: {type(webrtc_error).__name__}: {webrtc_error}")
-            with st.expander("WebRTC error details"):
-                st.code(traceback.format_exc())
-    st.markdown(
-        '<div class="small-note">Camera stream is ready for realtime detection.</div>',
-        unsafe_allow_html=True,
-    )
+with camera_tab:
+    video_col, info_col = st.columns([1.9, 1.1], gap="medium")
 
-with info_col:
-    @st.fragment(run_every="1s")
-    def render_live_stats() -> None:
+    with video_col:
+        st.subheader("Camera Detection")
+        camera_image = st.camera_input("Point your camera and click to capture")
+
+        if camera_image is not None and cv2 is not None:
+            file_bytes = np.frombuffer(camera_image.getvalue(), dtype=np.uint8)
+            img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+            if img is not None and model is not None:
+                annotated = process_snapshot_frame(
+                    img=img,
+                    model=model,
+                    conf_threshold=conf_threshold,
+                    iou_threshold=iou_threshold,
+                    alert_targets=set(alert_targets),
+                    alert_confidence=alert_confidence,
+                    alert_cooldown_sec=alert_cooldown_sec,
+                    inference_size=inference_size,
+                )
+                # Convert BGR to RGB for display.
+                display_img = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+                st.image(display_img, caption="Detection Result", use_container_width=True)
+            elif model is None:
+                st.warning("YOLO model is not loaded. Cannot run detection.")
+        else:
+            st.markdown(
+                '<div class="small-note">Click the camera button above to capture a frame for detection.</div>',
+                unsafe_allow_html=True,
+            )
+
+    with info_col:
         stats = snapshot_runtime()
 
         if stats["latest_alert_message"]:
@@ -774,4 +762,58 @@ with info_col:
             else:
                 st.caption("No alerts recorded yet.")
 
-    render_live_stats()
+with stream_tab:
+    st.subheader("Live Stream (WebRTC)")
+    st.caption("This mode requires a stable network connection. If it doesn't connect, use Camera Capture instead.")
+
+    if webrtc_streamer is None or av is None:
+        st.error("Live stream is unavailable because WebRTC dependencies failed to load.")
+        if WEBRTC_IMPORT_ERROR:
+            st.code(WEBRTC_IMPORT_ERROR)
+        if AV_IMPORT_ERROR:
+            st.code(AV_IMPORT_ERROR)
+    else:
+        try:
+            video_callback = create_video_callback(
+                model=model,
+                conf_threshold=conf_threshold,
+                iou_threshold=iou_threshold,
+                alert_targets=set(alert_targets),
+                alert_confidence=alert_confidence,
+                alert_cooldown_sec=alert_cooldown_sec,
+                auto_capture=False,
+                auto_capture_interval_sec=60.0,
+                process_every_n_frames=process_every_n_frames,
+                inference_size=inference_size,
+            )
+            webrtc_streamer(
+                key="object-detection",
+                video_frame_callback=video_callback,
+                rtc_configuration=build_rtc_configuration(),
+                async_processing=True,
+                media_stream_constraints={
+                    "video": {"width": {"ideal": 1280}, "height": {"ideal": 720}},
+                    "audio": False,
+                },
+            )
+        except Exception as webrtc_error:
+            st.error("WebRTC session failed to start.")
+            st.caption(f"Error: {type(webrtc_error).__name__}: {webrtc_error}")
+
+    stream_stats_col, _ = st.columns([1, 1])
+    with stream_stats_col:
+        @st.fragment(run_every="1s")
+        def render_stream_stats() -> None:
+            stats = snapshot_runtime()
+            if stats["latest_alert_message"]:
+                st.warning(stats["latest_alert_message"])
+            if stats["current_frame_counts"]:
+                st.table(
+                    [
+                        {"Object": obj, "Count": cnt}
+                        for obj, cnt in sorted(
+                            stats["current_frame_counts"].items(), key=lambda x: x[1], reverse=True
+                        )[:6]
+                    ]
+                )
+        render_stream_stats()
