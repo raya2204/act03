@@ -13,26 +13,7 @@ import math
 
 import numpy as np
 import streamlit as st
-try:
-    import av
-    AV_IMPORT_ERROR = ""
-except Exception as av_import_error:
-    av = None
-    AV_IMPORT_ERROR = str(av_import_error)
-
-try:
-    import cv2
-    CV2_IMPORT_ERROR = ""
-except Exception as cv2_error:
-    cv2 = None
-    CV2_IMPORT_ERROR = str(cv2_error)
-
-try:
-    from streamlit_webrtc import webrtc_streamer
-    WEBRTC_IMPORT_ERROR = ""
-except Exception as webrtc_import_error:
-    webrtc_streamer = None
-    WEBRTC_IMPORT_ERROR = str(webrtc_import_error)
+# WebRTC and AV removed as they cause UDP socket issues on Streamlit Cloud
 
 try:
     from ultralytics import YOLO
@@ -269,181 +250,12 @@ def overlay_hud(frame: Any, fps: float, current_counts: Counter, latest_alert: s
     return frame
 
 
-def create_video_callback(
-    model: YOLO | None,
-    conf_threshold: float,
-    iou_threshold: float,
-    alert_targets: set[str],
-    alert_confidence: float,
-    alert_cooldown_sec: float,
-    auto_capture: bool,
-    auto_capture_interval_sec: float,
-    process_every_n_frames: int,
-    inference_size: int,
-) -> Any:
-    if av is None:
-        return None
-    names = {} if model is None else model.names
-    callback_state = {"frame_index": 0}
+# create_video_callback removed as we now use st.camera_input with process_snapshot_frame
 
-    def get_label(cls_id: int) -> str:
-        return get_label_from_names(names, cls_id)
-
-    def callback(frame: av.VideoFrame) -> av.VideoFrame:
-        callback_state["frame_index"] += 1
-        img = frame.to_ndarray(format="bgr24")
-        now = time.time()
-        if model is None:
-            return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-        # Skip inference on selected frames for smoother UI on slower machines.
-        if process_every_n_frames > 1 and callback_state["frame_index"] % process_every_n_frames != 0:
-            with RUNTIME.lock:
-                RUNTIME.frames_processed += 1
-                RUNTIME.fps_window_count += 1
-                elapsed = now - RUNTIME.fps_window_start
-                if elapsed >= 1.0:
-                    RUNTIME.fps = RUNTIME.fps_window_count / max(elapsed, 1e-6)
-                    RUNTIME.fps_window_count = 0
-                    RUNTIME.fps_window_start = now
-                cached = (
-                    None if RUNTIME.latest_annotated_frame is None else RUNTIME.latest_annotated_frame.copy()
-                )
-            if cached is not None:
-                return av.VideoFrame.from_ndarray(cached, format="bgr24")
-
-        try:
-            results = model.predict(
-                img,
-                conf=conf_threshold,
-                iou=iou_threshold,
-                imgsz=inference_size,
-                max_det=24,
-                verbose=False,
-            )
-            result = results[0]
-            annotated = result.plot()
-        except Exception:
-            # Keep stream alive even if a single inference fails.
-            return av.VideoFrame.from_ndarray(img, format="bgr24")
-        current_counts: Counter = Counter()
-        latest_alert = ""
-        new_track_keys: list[tuple[str, int]] = []
-        fired_alerts: list[str] = []
-
-        boxes = result.boxes
-        detections: list[dict[str, Any]] = []
-        if boxes is not None and boxes.cls is not None and boxes.xyxy is not None:
-            cls_ids = boxes.cls.int().tolist()
-            confs = boxes.conf.tolist() if boxes.conf is not None else [1.0] * len(cls_ids)
-            bboxes = boxes.xyxy.tolist()
-
-            for cls_id, cls_conf, bbox in zip(cls_ids, confs, bboxes):
-                x1, y1, x2, y2 = bbox
-                label = get_label(cls_id)
-                current_counts[label] += 1
-                detections.append(
-                    {
-                        "label": label,
-                        "conf": float(cls_conf),
-                        "bbox": (int(x1), int(y1), int(x2), int(y2)),
-                        "cx": float((x1 + x2) / 2.0),
-                        "cy": float((y1 + y2) / 2.0),
-                    }
-                )
-                if label in alert_targets and float(cls_conf) >= alert_confidence:
-                    fired_alerts.append(f"{label}|{float(cls_conf):.2f}")
-
-        for track_id, det in assign_lightweight_tracks(detections, now_ts=now):
-            new_track_keys.append((det["label"], int(track_id)))
-
-        with RUNTIME.lock:
-            for track_key in new_track_keys:
-                RUNTIME.seen_tracks.add(track_key)
-
-            for alert_item in fired_alerts:
-                label, score = alert_item.split("|")
-                last_ts = RUNTIME.last_alert_time.get(label, 0.0)
-                if now - last_ts >= alert_cooldown_sec:
-                    latest_alert = (
-                        f"Alert: {label} ({score}) at {datetime.now().strftime('%H:%M:%S')}"
-                    )
-                    RUNTIME.last_alert_time[label] = now
-                    RUNTIME.latest_alert_message = latest_alert
-                    RUNTIME.alert_history.append(latest_alert)
-            RUNTIME.alert_history = RUNTIME.alert_history[-20:]
-
-            RUNTIME.frames_processed += 1
-            RUNTIME.fps_window_count += 1
-            elapsed = now - RUNTIME.fps_window_start
-            if elapsed >= 1.0:
-                RUNTIME.fps = RUNTIME.fps_window_count / max(elapsed, 1e-6)
-                RUNTIME.fps_window_count = 0
-                RUNTIME.fps_window_start = now
-
-            RUNTIME.current_frame_counts = current_counts
-            if latest_alert:
-                RUNTIME.latest_alert_message = latest_alert
-
-            annotated = overlay_hud(
-                annotated,
-                fps=RUNTIME.fps,
-                current_counts=current_counts,
-                latest_alert=RUNTIME.latest_alert_message,
-            )
-
-            RUNTIME.latest_annotated_frame = annotated.copy()
-
-            if auto_capture and sum(current_counts.values()) > 0:
-                if now - RUNTIME.last_auto_capture_ts >= auto_capture_interval_sec:
-                    save_frame(annotated, "auto_capture")
-                    RUNTIME.saved_frames += 1
-                    RUNTIME.last_auto_capture_ts = now
-
-        return av.VideoFrame.from_ndarray(annotated, format="bgr24")
-
-    return callback
+# webrtc video callback logic removed
 
 
-def build_rtc_configuration() -> dict[str, Any]:
-    # STUN + free TURN servers for reliable connectivity on Streamlit Cloud.
-    # Open Relay (metered.ca) provides 20 GB/month free TURN traffic.
-    ice_servers: list[dict[str, Any]] = [
-        {"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:openrelay.metered.ca:80"]},
-        {
-            "urls": [
-                "turn:openrelay.metered.ca:80",
-                "turn:openrelay.metered.ca:443",
-                "turn:openrelay.metered.ca:443?transport=tcp",
-            ],
-            "username": "openrelayproject",
-            "credential": "openrelayproject",
-        },
-    ]
-
-    # Optional custom TURN configuration from environment variables.
-    turn_urls = os.getenv("TURN_URLS", "")
-    turn_username = os.getenv("TURN_USERNAME", "")
-    turn_password = os.getenv("TURN_PASSWORD", "")
-
-    if isinstance(turn_urls, str):
-        parsed_urls = [u.strip() for u in turn_urls.split(",") if u.strip()]
-    elif isinstance(turn_urls, list):
-        parsed_urls = [str(u).strip() for u in turn_urls if str(u).strip()]
-    else:
-        parsed_urls = []
-
-    if parsed_urls and turn_username and turn_password:
-        ice_servers.append(
-            {
-                "urls": parsed_urls,
-                "username": str(turn_username),
-                "credential": str(turn_password),
-            }
-        )
-
-    return {"iceServers": ice_servers, "iceTransportPolicy": "all"}
+# WebRTC build_rtc_configuration removed
 
 def process_snapshot_frame(
     img: Any,
@@ -690,40 +502,38 @@ video_col, info_col = st.columns([1.9, 1.1], gap="medium")
 
 with video_col:
     st.subheader("Live Camera Preview")
-    if webrtc_streamer is None or av is None:
-        st.error("Realtime preview is unavailable because WebRTC dependencies failed to load.")
-        if WEBRTC_IMPORT_ERROR:
-            st.code(WEBRTC_IMPORT_ERROR)
-        if AV_IMPORT_ERROR:
-            st.code(AV_IMPORT_ERROR)
-    else:
+    
+    # Use Streamlit's built-in camera_input to completely bypass WebRTC/asyncio UDP socket issues
+    camera_image = st.camera_input("Take a picture to analyze", key="camera", label_visibility="collapsed")
+    
+    if camera_image is not None:
         try:
-            video_callback = create_video_callback(
+            # Convert the uploaded frame to an OpenCV image
+            bytes_data = camera_image.getvalue()
+            cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+            
+            # Process the snapshot
+            annotated_img = process_snapshot_frame(
+                img=cv2_img,
                 model=model,
                 conf_threshold=conf_threshold,
                 iou_threshold=iou_threshold,
                 alert_targets=set(alert_targets),
                 alert_confidence=alert_confidence,
                 alert_cooldown_sec=alert_cooldown_sec,
-                auto_capture=False,
-                auto_capture_interval_sec=60.0,
-                process_every_n_frames=process_every_n_frames,
                 inference_size=inference_size,
             )
-            webrtc_streamer(
-                key="object-detection",
-                video_frame_callback=video_callback,
-                rtc_configuration=build_rtc_configuration(),
-                async_processing=True,
-                media_stream_constraints={"video": True, "audio": False},
-            )
-        except Exception as webrtc_error:
-            st.error("WebRTC session failed to start.")
-            st.caption(f"Error: {type(webrtc_error).__name__}: {webrtc_error}")
-    st.markdown(
-        '<div class="small-note">Camera stream is ready for realtime detection.</div>',
-        unsafe_allow_html=True,
-    )
+            
+            # Display the analyzed frame
+            st.image(annotated_img, channels="BGR", use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"Error processing frame: {e}")
+    else:
+        st.markdown(
+            '<div class="small-note">Camera stream is ready. Allow camera access and take a snapshot to begin detection.</div>',
+            unsafe_allow_html=True,
+        )
 
 with info_col:
     @st.fragment(run_every="1s")
