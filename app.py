@@ -13,7 +13,13 @@ import math
 
 import numpy as np
 import streamlit as st
-# WebRTC and AV removed as they cause UDP socket issues on Streamlit Cloud
+
+try:
+    import cv2
+    CV2_IMPORT_ERROR = ""
+except Exception as cv2_error:
+    cv2 = None
+    CV2_IMPORT_ERROR = str(cv2_error)
 
 try:
     from ultralytics import YOLO
@@ -21,6 +27,8 @@ try:
 except Exception as yolo_import_error:
     YOLO = None
     YOLO_IMPORT_ERROR = str(yolo_import_error)
+
+# WebRTC and AV removed as they cause UDP socket issues on Streamlit Cloud
 
 
 CAPTURE_DIR = Path("captures")
